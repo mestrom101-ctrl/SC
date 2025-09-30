@@ -1,6 +1,28 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 
+/**
+ * @title GIBToken
+ * @dev BEP-20 compliant token for BNB Chain.
+ * 
+ * Applications:
+ * - Increase engagement: Businesses can use this token for customer loyalty and rewards programs.
+ * - Raise funds: Supports fundraising and crowdsales by allowing token sales with configurable taxes.
+ * - Motivate employees: Enables distribution of tokens as employee incentives, bonuses, or performance rewards.
+ * 
+ * Features:
+ * - Role-based access for governance, oracle, RBS, and treasury.
+ * - Configurable buy/sell tax logic for fundraising and treasury management.
+ * - Whitelist and governance lists for flexible business logic.
+ * - Minting functions for controlled token supply.
+ * 
+ * BEP-20 Verification:
+ * - Implements all required BEP-20 functions and events.
+ * - Includes metadata functions: name(), symbol(), decimals(), totalSupply().
+ * - Transfer, approve, and allowance functions are present.
+ * - Events: Transfer and Approval.
+ */
+
 contract ARKTokenClone {
     // Token metadata
     string private _name;
@@ -53,6 +75,17 @@ contract ARKTokenClone {
         _;
     }
     
+    /**
+     * @dev Constructor sets metadata and initial roles.
+     * @param name_ Token name
+     * @param symbol_ Token symbol
+     * @param decimals_ Token decimals
+     * @param initialSupply Initial token supply
+     * @param _governance Governance address
+     * @param _oracle Oracle address
+     * @param _rbs RBS address
+     * @param _treasury Treasury address
+     */
     constructor(
         string memory name_,
         string memory symbol_,
@@ -87,52 +120,87 @@ contract ARKTokenClone {
         whitelist[_treasury] = true;
     }
     
-    // ERC-20 standard functions
+    // BEP-20 standard functions
+    
+    /**
+     * @dev Returns the token name.
+     */
     function name() public view returns (string memory) {
         return _name;
     }
     
+    /**
+     * @dev Returns the token symbol.
+     */
     function symbol() public view returns (string memory) {
         return _symbol;
     }
     
+    /**
+     * @dev Returns the token decimals.
+     */
     function decimals() public view returns (uint8) {
         return _decimals;
     }
     
+    /**
+     * @dev Returns the total token supply.
+     */
     function totalSupply() public view returns (uint256) {
         return _totalSupply;
     }
     
+    /**
+     * @dev Returns the balance of a given account.
+     */
     function balanceOf(address account) public view returns (uint256) {
         return _balances[account];
     }
     
+    /**
+     * @dev Transfers tokens to a specified address.
+     * Applies tax logic for business fundraising and treasury management.
+     */
     function transfer(address to, uint256 amount) public returns (bool) {
         _transfer(msg.sender, to, amount);
         return true;
     }
     
+    /**
+     * @dev Returns the allowance for a spender on an owner's account.
+     */
     function allowance(address owner, address spender) public view returns (uint256) {
         return _allowances[owner][spender];
     }
     
+    /**
+     * @dev Approves a spender to spend tokens on behalf of the caller.
+     */
     function approve(address spender, uint256 amount) public returns (bool) {
         _approve(msg.sender, spender, amount);
         return true;
     }
     
+    /**
+     * @dev Transfers tokens from one address to another using allowance.
+     */
     function transferFrom(address from, address to, uint256 amount) public returns (bool) {
         _spendAllowance(from, msg.sender, amount);
         _transfer(from, to, amount);
         return true;
     }
     
+    /**
+     * @dev Increases the allowance for a spender.
+     */
     function increaseAllowance(address spender, uint256 addedValue) public returns (bool) {
         _approve(msg.sender, spender, _allowances[msg.sender][spender] + addedValue);
         return true;
     }
     
+    /**
+     * @dev Decreases the allowance for a spender.
+     */
     function decreaseAllowance(address spender, uint256 subtractedValue) public returns (bool) {
         uint256 currentAllowance = _allowances[msg.sender][spender];
         require(currentAllowance >= subtractedValue, "ERC20: decreased allowance below zero");
@@ -214,6 +282,10 @@ contract ARKTokenClone {
     }
     
     // Governance functions
+    
+    /**
+     * @dev Updates the governance address.
+     */
     function setGovernance(address newGovernance) external onlyGovernance {
         require(newGovernance != address(0), "New governance cannot be the zero address");
         address oldGovernance = governance;
@@ -221,6 +293,9 @@ contract ARKTokenClone {
         emit GovernanceUpdated(oldGovernance, newGovernance);
     }
     
+    /**
+     * @dev Updates the oracle address.
+     */
     function setOracle(address newOracle) external onlyGovernance {
         require(newOracle != address(0), "New oracle cannot be the zero address");
         address oldOracle = oracle;
@@ -228,6 +303,9 @@ contract ARKTokenClone {
         emit OracleUpdated(oldOracle, newOracle);
     }
     
+    /**
+     * @dev Updates the RBS address.
+     */
     function setRBS(address newRBS) external onlyGovernance {
         require(newRBS != address(0), "New RBS cannot be the zero address");
         address oldRBS = rbs;
@@ -235,6 +313,9 @@ contract ARKTokenClone {
         emit RBSUpdated(oldRBS, newRBS);
     }
     
+    /**
+     * @dev Updates the treasury address.
+     */
     function setTreasury(address newTreasury) external onlyGovernance {
         require(newTreasury != address(0), "New treasury cannot be the zero address");
         address oldTreasury = treasury;
@@ -242,6 +323,9 @@ contract ARKTokenClone {
         emit TreasuryUpdated(oldTreasury, newTreasury);
     }
     
+    /**
+     * @dev Updates buy and sell tax rates.
+     */
     function setTaxes(uint256 newBuyTax, uint256 newSellTax) external onlyGovernance {
         require(newBuyTax <= MAX_TAX, "Buy tax cannot exceed 100%");
         require(newSellTax <= MAX_TAX, "Sell tax cannot exceed 100%");
@@ -252,11 +336,17 @@ contract ARKTokenClone {
         emit TaxesUpdated(newBuyTax, newSellTax);
     }
     
+    /**
+     * @dev Updates whitelist status for an account.
+     */
     function updateWhitelist(address account, bool status) external onlyGovernance {
         whitelist[account] = status;
         emit WhitelistUpdated(account, status);
     }
     
+    /**
+     * @dev Updates governance list status for an account.
+     */
     function updateGovernanceList(address account, bool isLong, bool status) external onlyGovernance {
         if (isLong) {
             longGovernanceList[account] = status;
@@ -266,21 +356,34 @@ contract ARKTokenClone {
         emit GovernanceListUpdated(account, isLong, status);
     }
     
-    // Minting function for oracle and RBS
+    /**
+     * @dev Minting function for oracle and RBS.
+     * Used for employee incentives and business rewards.
+     */
     function mint(address to, uint256 amount) external onlyOracleOrRBS {
         _mint(to, amount);
         emit TokensMinted(to, amount);
     }
     
     // View functions to check list status
+    
+    /**
+     * @dev Returns true if account is whitelisted.
+     */
     function isWhitelisted(address account) external view returns (bool) {
         return whitelist[account];
     }
     
+    /**
+     * @dev Returns true if account is in long governance list.
+     */
     function isInLongGovernanceList(address account) external view returns (bool) {
         return longGovernanceList[account];
     }
     
+    /**
+     * @dev Returns true if account is in short governance list.
+     */
     function isInShortGovernanceList(address account) external view returns (bool) {
         return shortGovernanceList[account];
     }
