@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 
+import "@openzeppelin/contracts/security/Pausable.sol";
+import "@openzeppelin/contracts/utils/math/SafeMath.sol";
+
 /**
  * @title GIBToken
  * @dev BEP-20 compliant token for BNB Chain.
@@ -27,7 +30,9 @@ interface IMultiSigWallet {
     function isConfirmed(address account) external view returns (bool);
 }
 
-contract ARKTokenClone {
+contract ARKTokenClone is Pausable {
+    using SafeMath for uint256;
+
     // Token metadata
     string private _name;
     string private _symbol;
@@ -174,30 +179,30 @@ contract ARKTokenClone {
     function balanceOf(address account) public view returns (uint256) {
         return _balances[account];
     }
-    function transfer(address to, uint256 amount) public returns (bool) {
+    function transfer(address to, uint256 amount) public whenNotPaused returns (bool) {
         _transfer(msg.sender, to, amount);
         return true;
     }
     function allowance(address owner, address spender) public view returns (uint256) {
         return _allowances[owner][spender];
     }
-    function approve(address spender, uint256 amount) public returns (bool) {
+    function approve(address spender, uint256 amount) public whenNotPaused returns (bool) {
         _approve(msg.sender, spender, amount);
         return true;
     }
-    function transferFrom(address from, address to, uint256 amount) public returns (bool) {
+    function transferFrom(address from, address to, uint256 amount) public whenNotPaused returns (bool) {
         _spendAllowance(from, msg.sender, amount);
         _transfer(from, to, amount);
         return true;
     }
-    function increaseAllowance(address spender, uint256 addedValue) public returns (bool) {
-        _approve(msg.sender, spender, _allowances[msg.sender][spender] + addedValue);
+    function increaseAllowance(address spender, uint256 addedValue) public whenNotPaused returns (bool) {
+        _approve(msg.sender, spender, _allowances[msg.sender][spender].add(addedValue));
         return true;
     }
-    function decreaseAllowance(address spender, uint256 subtractedValue) public returns (bool) {
+    function decreaseAllowance(address spender, uint256 subtractedValue) public whenNotPaused returns (bool) {
         uint256 currentAllowance = _allowances[msg.sender][spender];
         require(currentAllowance >= subtractedValue, "ERC20: decreased allowance below zero");
-        _approve(msg.sender, spender, currentAllowance - subtractedValue);
+        _approve(msg.sender, spender, currentAllowance.sub(subtractedValue));
         return true;
     }
     
@@ -233,18 +238,18 @@ contract ARKTokenClone {
         
         // Calculate tax amount if applicable
         if (taxRate > 0) {
-            taxAmount = (amount * taxRate) / MAX_TAX;
+            taxAmount = amount.mul(taxRate).div(MAX_TAX);
             _basicTransfer(from, _treasury, taxAmount);
         }
         
         // Transfer the remaining amount
-        _basicTransfer(from, to, amount - taxAmount);
+        _basicTransfer(from, to, amount.sub(taxAmount));
     }
     
     // Basic transfer without tax logic
     function _basicTransfer(address from, address to, uint256 amount) private {
-        _balances[from] -= amount;
-        _balances[to] += amount;
+        _balances[from] = _balances[from].sub(amount);
+        _balances[to] = _balances[to].add(amount);
         emit Transfer(from, to, amount);
     }
     
@@ -252,8 +257,8 @@ contract ARKTokenClone {
     function _mint(address account, uint256 amount) private {
         require(account != address(0), "ERC20: mint to the zero address");
         
-        _totalSupply += amount;
-        _balances[account] += amount;
+        _totalSupply = _totalSupply.add(amount);
+        _balances[account] = _balances[account].add(amount);
         emit Transfer(address(0), account, amount);
     }
     
@@ -270,7 +275,7 @@ contract ARKTokenClone {
         uint256 currentAllowance = allowance(owner, spender);
         if (currentAllowance != type(uint256).max) {
             require(currentAllowance >= amount, "ERC20: insufficient allowance");
-            _approve(owner, spender, currentAllowance - amount);
+            _approve(owner, spender, currentAllowance.sub(amount));
         }
     }
     
@@ -279,7 +284,7 @@ contract ARKTokenClone {
     /**
      * @dev Updates the governance address. Only callable by multi-sig governance.
      */
-    function setGovernance(address newGovernance) external onlyGovernance {
+    function setGovernance(address newGovernance) external onlyGovernance whenNotPaused {
         require(newGovernance != address(0), "New governance cannot be the zero address");
         address oldGovernance = _governance;
         _governance = newGovernance;
@@ -289,7 +294,7 @@ contract ARKTokenClone {
     /**
      * @dev Updates the oracle address. Only callable by multi-sig governance.
      */
-    function setOracle(address newOracle) external onlyGovernance {
+    function setOracle(address newOracle) external onlyGovernance whenNotPaused {
         require(newOracle != address(0), "New oracle cannot be the zero address");
         address oldOracle = _oracle;
         _oracle = newOracle;
@@ -299,7 +304,7 @@ contract ARKTokenClone {
     /**
      * @dev Updates the RBS address. Only callable by multi-sig governance.
      */
-    function setRBS(address newRBS) external onlyGovernance {
+    function setRBS(address newRBS) external onlyGovernance whenNotPaused {
         require(newRBS != address(0), "New RBS cannot be the zero address");
         address oldRBS = _rbs;
         _rbs = newRBS;
@@ -309,7 +314,7 @@ contract ARKTokenClone {
     /**
      * @dev Updates the treasury address. Only callable by multi-sig governance.
      */
-    function setTreasury(address newTreasury) external onlyGovernance {
+    function setTreasury(address newTreasury) external onlyGovernance whenNotPaused {
         require(newTreasury != address(0), "New treasury cannot be the zero address");
         address oldTreasury = _treasury;
         _treasury = newTreasury;
@@ -319,7 +324,7 @@ contract ARKTokenClone {
     /**
      * @dev Updates the multi-sig governance contract address. Only callable by current multi-sig.
      */
-    function setMultiSigGovernance(address newMultiSig) external onlyGovernance {
+    function setMultiSigGovernance(address newMultiSig) external onlyGovernance whenNotPaused {
         require(newMultiSig != address(0), "New multi-sig cannot be the zero address");
         address oldMultiSig = address(_multiSigGovernance);
         _multiSigGovernance = IMultiSigWallet(newMultiSig);
@@ -329,7 +334,7 @@ contract ARKTokenClone {
     /**
      * @dev Updates buy and sell tax rates. Only callable by multi-sig governance.
      */
-    function setTaxes(uint256 newBuyTax, uint256 newSellTax) external onlyGovernance {
+    function setTaxes(uint256 newBuyTax, uint256 newSellTax) external onlyGovernance whenNotPaused {
         require(newBuyTax <= MAX_TAX, "Buy tax cannot exceed 100%");
         require(newSellTax <= MAX_TAX, "Sell tax cannot exceed 100%");
         
@@ -342,7 +347,7 @@ contract ARKTokenClone {
     /**
      * @dev Updates whitelist status for an account. Only callable by multi-sig governance.
      */
-    function updateWhitelist(address account, bool status) external onlyGovernance {
+    function updateWhitelist(address account, bool status) external onlyGovernance whenNotPaused {
         _whitelist[account] = status;
         emit WhitelistUpdated(account, status);
     }
@@ -350,7 +355,7 @@ contract ARKTokenClone {
     /**
      * @dev Updates governance list status for an account. Only callable by multi-sig governance.
      */
-    function updateGovernanceList(address account, bool isLong, bool status) external onlyGovernance {
+    function updateGovernanceList(address account, bool isLong, bool status) external onlyGovernance whenNotPaused {
         if (isLong) {
             _longGovernanceList[account] = status;
         } else {
@@ -363,8 +368,22 @@ contract ARKTokenClone {
      * @dev Minting function for oracle and RBS.
      * Used for employee incentives and business rewards.
      */
-    function mint(address to, uint256 amount) external onlyOracleOrRBS {
+    function mint(address to, uint256 amount) external onlyOracleOrRBS whenNotPaused {
         _mint(to, amount);
         emit TokensMinted(to, amount);
+    }
+
+    /**
+     * @dev Pause contract (only governance).
+     */
+    function pause() external onlyGovernance {
+        _pause();
+    }
+
+    /**
+     * @dev Unpause contract (only governance).
+     */
+    function unpause() external onlyGovernance {
+        _unpause();
     }
 }
