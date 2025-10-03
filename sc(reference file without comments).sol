@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 
-import "@openzeppelin/contracts/security/Pausable.sol";
-import "@openzeppelin/contracts/utils/math/SafeMath.sol";
+import "@node_modules/openzeppelin/contracts/security/Pausable.sol";
+import "@node_modules/openzeppelin/contracts/utils/math/SafeMath.sol";
 
 /**
  * @title GIBToken
